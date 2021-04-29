@@ -1,7 +1,13 @@
-function dropCommentsAndWhitespace(s) {
+import { browser, WebRequest } from "webextension-polyfill-ts";
+
+type OnHeadersReceivedDetailsType = WebRequest.OnHeadersReceivedDetailsType;
+
+let rules: [RegExp, [RegExp, string][]][] = []
+
+function dropCommentsAndWhitespace(s: string) {
     var r = "";
     var lines = s.match(/[^\r\n]+/g) || [];
-    lines.forEach(function(line) {
+    lines.forEach(function (line) {
         if (line.match(/^\s*#/) !== null ||
             line.match(/^\s*$/) !== null) {
             return;
@@ -11,7 +17,7 @@ function dropCommentsAndWhitespace(s) {
     return r;
 }
 
-function parseRules(config) {
+function parseRules(config: string) {
     config = dropCommentsAndWhitespace(config);
     if (config === "") {
         return [];
@@ -23,19 +29,26 @@ function parseRules(config) {
     }
 }
 
-function validateRules(rules) {
+type Rule = [
+    regexp: string,
+    patterns: string[]
+]
+
+function validateRules(rules: Rule[] | null) {
     if (!Array.isArray(rules)) {
         return null;
     }
     var fail = false;
-    rules.forEach(function(rule) {
+    // @ts-ignore
+    rules.forEach(function (rule) {
         if (rule.length !== 2 ||
             typeof rule[0] !== "string" ||
             !Array.isArray(rule[1])) {
             fail = true;
             return null;
         }
-        rule[1].forEach(function(subrule) {
+        // @ts-ignore
+        rule[1].forEach(function (subrule) {
             if (subrule.length !== 2 ||
                 typeof subrule[0] !== "string" ||
                 typeof subrule[1] !== "string") {
@@ -53,14 +66,14 @@ function validateRules(rules) {
     return rules;
 }
 
-function regexpifyRules(newRules) {
+function regexpifyRules(newRules: Rule[] | null) {
     if (newRules === null) {
         return null;
     }
-    return newRules.map(function(rule) {
+    return newRules.map(function (rule) {
         return [
             new RegExp(rule[0]),
-            rule[1].map(function(subrule) {
+            rule[1].map(function (subrule) {
                 return [
                     new RegExp(subrule[0]),
                     subrule[1]
@@ -70,45 +83,42 @@ function regexpifyRules(newRules) {
     });
 }
 
-function processConfig(config) {
+function processConfig(config?: string) {
     if (typeof config !== "string") {
         config = "";
     }
     return regexpifyRules(validateRules(parseRules(config)));
 }
 
-function messageHandler(request, sender, sendResponse) {
+// @ts-ignore
+async function messageHandler(request) {
     if (request.action === "RESTORE_CONFIG") {
-        chrome.storage.sync.get({config: defaultConfig}, function(items) {
-            var config = items.config;
-            if (typeof config !== "string") {
-                config = defaultConfig;
-            }
-            sendResponse(config);
-        });
-        return true;
+        const items = await browser.storage.sync.get({ config: defaultConfig })
+        const config = items.config ? items.config : defaultConfig;
+        return config;
     } else if (request.action === "SAVE_CONFIG") {
-        var config = request.config;
-        newRules = processConfig(config);
+        const config = request.config;
+        const newRules = processConfig(config);
         if (newRules !== null) {
-            chrome.storage.sync.set({config: config});
+            await browser.storage.sync.set({ config: config });
+            // @ts-ignore
             rules = newRules;
-            sendResponse("SUCCESS");
+            return "SUCCESS";
         } else {
-            sendResponse("FAILURE");
+            return "FAILURE";
         }
     } else {
         console.error("Invalid request: ", request);
     }
 }
 
-function requestProcessor(details) {
+function requestProcessor(details: OnHeadersReceivedDetailsType) {
     for (var i = 0, iLen = rules.length; i !== iLen; ++i) {
         if (!rules[i][0].test(details.url)) {
             continue;
         }
         var subrules = rules[i][1];
-        var headers = details.responseHeaders;
+        var headers = details.responseHeaders || [];
         for (var j = 0, jLen = headers.length; j !== jLen; ++j) {
             var header = headers[j];
             var name = header.name.toLowerCase();
@@ -118,15 +128,16 @@ function requestProcessor(details) {
                 continue;
             }
             for (var k = 0, kLen = subrules.length; k !== kLen; ++k) {
-                header.value = header.value.replace(subrules[k][0],
-                                                    subrules[k][1]);
+                header.value = header?.value?.replace(subrules[k][0],
+                    subrules[k][1]);
             }
         }
-        return {responseHeaders: headers};
+        return { responseHeaders: headers };
     }
+    return { responseHeaders: details.responseHeaders };
 }
 
-var defaultConfig =
+const defaultConfig =
     "# Rules need to be in JSON syntax:\n" +
     "#\n" +
     "# [\n" +
@@ -148,16 +159,18 @@ var defaultConfig =
     "#    ]]\n" +
     "]\n";
 
-var rules = []
-
-chrome.storage.sync.get({config: ""}, function(items) {
-    newRules = processConfig(items.config);
+console.log("START");
+browser.storage.sync.get({ config: "" }).then(function (items) {
+    console.log("items", items);
+    const newRules = processConfig(items.config);
     if (newRules !== null) {
+        // @ts-ignore
         rules = newRules;
     }
+    // @ts-ignore
+    browser.runtime.onMessage.addListener(messageHandler);
+    browser.webRequest.onHeadersReceived.addListener(requestProcessor, {
+        urls: ["*://*/*"],
+        types: ["main_frame", "sub_frame"]
+    }, ["blocking", "responseHeaders"]);
 });
-chrome.runtime.onMessage.addListener(messageHandler);
-chrome.webRequest.onHeadersReceived.addListener(requestProcessor, {
-    urls: ["*://*/*"],
-    types: ["main_frame", "sub_frame"]
-}, ["blocking", "responseHeaders"]);

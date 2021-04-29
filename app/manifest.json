@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "version": "1.2.0",
+  "name": "Content Security Policy Override",
+  "description": "Modify the Content Security Policy of web pages.",
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "webRequest",
+    "webRequestBlocking",
+    "*://*/"
+  ],
+  "options_ui": {
+    "page": "pages/options.html",
+    "chrome_style": true
+  },
+  "background": {
+    "scripts": [
+      "scripts/background.js"
+    ],
+    "persistent": true
+  },
+  "__firefox__applications": {
+    "gecko": {
+      "id": "cspmod@azu.github.io"
+    }
+  }
+}
